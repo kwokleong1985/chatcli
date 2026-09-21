@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,14 +66,33 @@ def _text(s):
     return SimpleNamespace(type="text", text=s)
 
 
+def _dispose_loop(m):
+    """Stop and close the manager's background event loop so no sockets are left for the GC."""
+    loop = m._loop
+    if loop is None:
+        return
+    loop.call_soon_threadsafe(loop.stop)
+    thread = getattr(m, "_thread", None)
+    if thread is not None:
+        thread.join(timeout=5)
+    else:
+        # McpManager.start() owns its thread; wait until the loop has stopped running
+        for _ in range(100):
+            if not loop.is_running():
+                break
+            time.sleep(0.05)
+    loop.close()
+
+
 @pytest.fixture
 def manager():
     """A manager with a live event loop but no real servers; tests register fake sessions."""
     m = McpManager()
     m._loop = asyncio.new_event_loop()
-    threading.Thread(target=m._loop.run_forever, daemon=True).start()
+    m._thread = threading.Thread(target=m._loop.run_forever, daemon=True)
+    m._thread.start()
     yield m
-    m._loop.call_soon_threadsafe(m._loop.stop)
+    _dispose_loop(m)
 
 
 def _register(m, session, exposed="t", original="orig"):
@@ -127,6 +147,7 @@ def real_manager():
     m = McpManager()
     yield m
     m.close()
+    _dispose_loop(m)
 
 
 def test_a_server_that_cannot_start_is_reported_not_raised(real_manager):
