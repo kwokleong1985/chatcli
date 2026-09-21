@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Secrets and local config (ChatCLI keeps its own in ~/.chatcli, but just in case)
+.env
+.env.*
+*.enc
+salt.bin
+.chatcli/
+
+# Logs and editor files
+*.log
+*.jsonl
+.vscode/
+.idea/
