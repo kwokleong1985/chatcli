@@ -7,15 +7,15 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from .paths import APP_DIR, SALT_FILE
+from .fileio import atomic_write_bytes
+from .paths import SALT_FILE
 
 
 def get_or_create_salt() -> bytes:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
     if SALT_FILE.exists():
         return SALT_FILE.read_bytes()
     salt = os.urandom(16)
-    SALT_FILE.write_bytes(salt)
+    atomic_write_bytes(SALT_FILE, salt)  # a torn salt would make the config undecryptable
     return salt
 
 

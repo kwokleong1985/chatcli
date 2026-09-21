@@ -8,6 +8,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import AsyncExitStack
 from typing import Optional, List, Dict, Any
 
+from .models import McpServerConfig
 from .paths import LOG_DIR
 
 try:  # MCP is optional: chat works without it, tool calling doesn't
@@ -77,9 +78,9 @@ class McpManager:
     def openai_tools(self) -> List[dict]:
         return list(self._schemas)
 
-    def start(self, servers: List[dict]) -> bool:
+    def start(self, servers: List[McpServerConfig]) -> bool:
         """Connect to `servers`. No-op (returns False) if that exact set is already running."""
-        key = json.dumps(servers, sort_keys=True)
+        key = json.dumps([s.to_dict() for s in servers], sort_keys=True)
         if self._future is not None and key == self._key:
             return False
         self.close()
@@ -105,7 +106,7 @@ class McpManager:
         self._future, self._key, self._shutdown = None, None, None
         self._tools, self._schemas, self.server_tools = {}, [], {}
 
-    async def _serve(self, servers: List[dict]) -> None:
+    async def _serve(self, servers: List[McpServerConfig]) -> None:
         self._shutdown = asyncio.Event()
         try:
             async with AsyncExitStack() as stack:
@@ -113,20 +114,20 @@ class McpManager:
                     try:
                         await self._connect(stack, srv)
                     except Exception as exc:
-                        self.errors[srv["name"]] = f"{type(exc).__name__}: {exc}"
+                        self.errors[srv.name] = f"{type(exc).__name__}: {exc}"
                 self._ready.set()
                 await self._shutdown.wait()
         finally:
             self._ready.set()  # never leave start() blocked, even if setup blew up
 
-    async def _connect(self, stack: AsyncExitStack, srv: dict) -> None:
+    async def _connect(self, stack: AsyncExitStack, srv: McpServerConfig) -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         # The server's stderr goes to a file so its logging doesn't garble the terminal.
         errlog = stack.enter_context(
-            open(LOG_DIR / f"mcp_{safe_name(srv['name'])}.log", "a", encoding="utf-8")
+            open(LOG_DIR / f"mcp_{safe_name(srv.name)}.log", "a", encoding="utf-8")
         )
         params = StdioServerParameters(
-            command=srv["command"], args=srv.get("args", []), env=srv.get("env") or None
+            command=srv.command, args=srv.args, env=srv.env or None
         )
         read, write = await stack.enter_async_context(stdio_client(params, errlog=errlog))
         session = await stack.enter_async_context(ClientSession(read, write))
@@ -136,7 +137,7 @@ class McpManager:
         for tool in (await session.list_tools()).tools:
             exposed = tool.name
             if exposed in self._tools:  # same tool name from two servers
-                exposed = f"{safe_name(srv['name'])}__{tool.name}"
+                exposed = f"{safe_name(srv.name)}__{tool.name}"
             schema = (
                 getattr(tool, "input_schema", None)
                 or getattr(tool, "inputSchema", None)
@@ -152,7 +153,7 @@ class McpManager:
                 },
             })
             names.append(exposed)
-        self.server_tools[srv["name"]] = names
+        self.server_tools[srv.name] = names
 
     def call(self, name: str, args: dict) -> str:
         """Run a tool and return its output as text. Never raises: errors come back as text."""

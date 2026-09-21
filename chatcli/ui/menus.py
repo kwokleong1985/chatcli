@@ -11,14 +11,15 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from ..mcp_client import MCP_AVAILABLE, McpManager, safe_name
+from ..models import Config, Endpoint, McpServerConfig, SystemPrompt
 from ..paths import LOG_DIR
 from ..providers import EFFORT_LEVELS, reasoning_label
-from ..store import default_show_usage, save_config
+from ..store import save_config
 from .common import console, divider, pick
 
 
-def ep_label(e: dict) -> str:
-    return f"{e['name']}  [{e['model']}]  {e['base_url']}"
+def ep_label(e: Endpoint) -> str:
+    return f"{e.name}  [{e.model}]  {e.base_url}"
 
 
 def _ask_thinking(cur_thinking: bool = True, cur_effort: str = "default") -> tuple:
@@ -38,7 +39,7 @@ def _ask_thinking(cur_thinking: bool = True, cur_effort: str = "default") -> tup
     return thinking, effort
 
 
-def manage_endpoints(config: dict, fernet: Fernet) -> None:
+def manage_endpoints(config: Config, fernet: Fernet) -> None:
     while True:
         divider("Endpoints")
         console.print(
@@ -59,52 +60,47 @@ def manage_endpoints(config: dict, fernet: Fernet) -> None:
             api_key  = getpass.getpass("API Key: ")
             model    = Prompt.ask("Model (e.g. gpt-4o)")
             thinking, effort = _ask_thinking()
-            config["endpoints"].append({
-                "name": name,
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": model,
-                "thinking": thinking,
-                "reasoning_effort": effort,
-            })
+            config.endpoints.append(Endpoint(
+                name=name,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                thinking=thinking,
+                reasoning_effort=effort,
+            ))
             save_config(config, fernet)
             console.print(f"[green]Endpoint '{name}' saved.[/green]")
 
         elif ch == "2":
-            idx = pick("Delete endpoint", config["endpoints"], ep_label)
+            idx = pick("Delete endpoint", config.endpoints, ep_label)
             if idx is not None:
-                removed = config["endpoints"].pop(idx)
+                removed = config.endpoints.pop(idx)
                 save_config(config, fernet)
-                console.print(f"[green]Deleted '{removed['name']}'.[/green]")
+                console.print(f"[green]Deleted '{removed.name}'.[/green]")
 
         elif ch == "3":
-            if not config["endpoints"]:
+            if not config.endpoints:
                 console.print("[yellow]No endpoints saved yet.[/yellow]")
                 continue
             t = Table(title="Endpoints", show_lines=True)
             for col in ("Name", "Base URL", "Model", "Reasoning"):
                 t.add_column(col)
-            for e in config["endpoints"]:
-                t.add_row(
-                    e["name"], e["base_url"], e["model"],
-                    reasoning_label(e.get("thinking", True), e.get("reasoning_effort", "default")),
-                )
+            for e in config.endpoints:
+                t.add_row(e.name, e.base_url, e.model, reasoning_label(e.thinking, e.reasoning_effort))
             console.print(t)
 
         elif ch == "4":
-            idx = pick("Change reasoning settings for", config["endpoints"], ep_label)
+            idx = pick("Change reasoning settings for", config.endpoints, ep_label)
             if idx is not None:
-                ep = config["endpoints"][idx]
-                ep["thinking"], ep["reasoning_effort"] = _ask_thinking(
-                    ep.get("thinking", True), ep.get("reasoning_effort", "default")
-                )
+                ep = config.endpoints[idx]
+                ep.thinking, ep.reasoning_effort = _ask_thinking(ep.thinking, ep.reasoning_effort)
                 save_config(config, fernet)
-                console.print(f"[green]Updated '{ep['name']}'.[/green]")
+                console.print(f"[green]Updated '{ep.name}'.[/green]")
 
 
 # ── System prompt management ──────────────────────────────────────────────────
 
-def manage_prompts(config: dict, fernet: Fernet) -> None:
+def manage_prompts(config: Config, fernet: Fernet) -> None:
     while True:
         divider("System Prompts")
         console.print(
@@ -128,38 +124,38 @@ def manage_prompts(config: dict, fernet: Fernet) -> None:
                     break
                 lines.append(line)
             content = "\n".join(lines)
-            config["system_prompts"].append({"name": name, "content": content})
+            config.system_prompts.append(SystemPrompt(name=name, content=content))
             save_config(config, fernet)
             console.print(f"[green]Prompt '{name}' saved.[/green]")
 
         elif ch == "2":
-            idx = pick("Delete prompt", config["system_prompts"], lambda p: p["name"])
+            idx = pick("Delete prompt", config.system_prompts, lambda p: p.name)
             if idx is not None:
-                removed = config["system_prompts"].pop(idx)
+                removed = config.system_prompts.pop(idx)
                 save_config(config, fernet)
-                console.print(f"[green]Deleted '{removed['name']}'.[/green]")
+                console.print(f"[green]Deleted '{removed.name}'.[/green]")
 
         elif ch == "3":
-            if not config["system_prompts"]:
+            if not config.system_prompts:
                 console.print("[yellow]No system prompts saved yet.[/yellow]")
                 continue
             t = Table(title="System Prompts", show_lines=True)
             t.add_column("Name")
             t.add_column("Preview")
-            for p in config["system_prompts"]:
-                preview = p["content"][:80].replace("\n", " ")
-                if len(p["content"]) > 80:
+            for p in config.system_prompts:
+                preview = p.content[:80].replace("\n", " ")
+                if len(p.content) > 80:
                     preview += "…"
-                t.add_row(p["name"], preview)
+                t.add_row(p.name, preview)
             console.print(t)
 
 
 # ── Global settings ───────────────────────────────────────────────────────────
 
-def manage_settings(config: dict, fernet: Fernet) -> None:
+def manage_settings(config: Config, fernet: Fernet) -> None:
     while True:
         divider("Settings")
-        usage_on = default_show_usage(config)
+        usage_on = config.settings.show_usage
         console.print(
             f"  [yellow]1[/yellow]. Show token/cache usage after each reply, by default: "
             f"[bold]{'on' if usage_on else 'off'}[/bold]  [dim](select to toggle)[/dim]\n"
@@ -171,7 +167,7 @@ def manage_settings(config: dict, fernet: Fernet) -> None:
             return
 
         elif ch == "1":
-            config["settings"]["show_usage"] = not usage_on
+            config.settings.show_usage = not usage_on
             save_config(config, fernet)
             console.print(
                 f"[green]Usage stats default: {'on' if not usage_on else 'off'}.[/green] "
@@ -180,9 +176,9 @@ def manage_settings(config: dict, fernet: Fernet) -> None:
             )
 
 
-def prepare_mcp(config: dict, mcp: McpManager) -> None:
+def prepare_mcp(config: Config, mcp: McpManager) -> None:
     """Make sure the configured MCP servers are connected before a chat starts."""
-    servers = config.get("mcp_servers", [])
+    servers = config.mcp_servers
     if not servers:
         return
     if not MCP_AVAILABLE:
@@ -199,11 +195,11 @@ def prepare_mcp(config: dict, mcp: McpManager) -> None:
             )
 
 
-def _mcp_label(s: dict) -> str:
-    return f"{s['name']}  {s['command']} {' '.join(s.get('args', []))}"
+def _mcp_label(s: McpServerConfig) -> str:
+    return f"{s.name}  {s.command} {' '.join(s.args)}"
 
 
-def manage_mcp_servers(config: dict, fernet: Fernet, mcp: McpManager) -> None:
+def manage_mcp_servers(config: Config, fernet: Fernet, mcp: McpManager) -> None:
     while True:
         divider("MCP Servers")
         console.print(
@@ -230,37 +226,37 @@ def manage_mcp_servers(config: dict, fernet: Fernet, mcp: McpManager) -> None:
                 if not key:
                     break
                 env[key] = getpass.getpass(f"{key} value: ")
-            config["mcp_servers"].append(
-                {"name": name, "command": command, "args": args, "env": env}
+            config.mcp_servers.append(
+                McpServerConfig(name=name, command=command, args=args, env=env)
             )
             save_config(config, fernet)
             console.print(f"[green]MCP server '{name}' saved. It connects when you start a chat.[/green]")
 
         elif ch == "2":
-            idx = pick("Delete MCP server", config["mcp_servers"], _mcp_label)
+            idx = pick("Delete MCP server", config.mcp_servers, _mcp_label)
             if idx is not None:
-                removed = config["mcp_servers"].pop(idx)
+                removed = config.mcp_servers.pop(idx)
                 save_config(config, fernet)
-                console.print(f"[green]Deleted '{removed['name']}'.[/green]")
+                console.print(f"[green]Deleted '{removed.name}'.[/green]")
 
         elif ch == "3":
-            if not config["mcp_servers"]:
+            if not config.mcp_servers:
                 console.print("[yellow]No MCP servers saved yet.[/yellow]")
                 continue
             t = Table(title="MCP Servers", show_lines=True)
             for col in ("Name", "Command", "Env vars", "Status"):
                 t.add_column(col)
-            for s in config["mcp_servers"]:
-                if s["name"] in mcp.errors:
-                    status = f"[red]failed: {escape(mcp.errors[s['name']])}[/red]"
-                elif s["name"] in mcp.server_tools:
-                    status = f"connected: {', '.join(mcp.server_tools[s['name']]) or 'no tools'}"
+            for s in config.mcp_servers:
+                if s.name in mcp.errors:
+                    status = f"[red]failed: {escape(mcp.errors[s.name])}[/red]"
+                elif s.name in mcp.server_tools:
+                    status = f"connected: {', '.join(mcp.server_tools[s.name]) or 'no tools'}"
                 else:
                     status = "[dim]not connected yet[/dim]"
                 t.add_row(
-                    s["name"],
-                    escape(f"{s['command']} {' '.join(s.get('args', []))}"),
-                    ", ".join(s.get("env", {})) or "-",
+                    s.name,
+                    escape(f"{s.command} {' '.join(s.args)}"),
+                    ", ".join(s.env) or "-",
                     status,
                 )
             console.print(t)

@@ -2,6 +2,8 @@
 
 from typing import Optional
 
+from .models import Session
+
 # OpenAI-standard `reasoning_effort` values. "default" means the parameter is
 # omitted and the model decides. "none" is OpenAI's way to disable reasoning.
 EFFORT_LEVELS = ["default", "none", "minimal", "low", "medium", "high", "xhigh"]
@@ -13,23 +15,23 @@ def reasoning_label(thinking: bool, effort: str) -> str:
     return f"on ({effort})"
 
 
-def reasoning_params(sess: dict) -> dict:
+def reasoning_params(sess: Session) -> dict:
     """Extra request fields for the session's thinking / reasoning-effort settings.
 
     Passed via extra_body so it works on any openai SDK version and is forwarded
     as-is to OpenAI-compatible servers.
     """
-    gemini = "generativelanguage.googleapis.com" in sess.get("base_url", "")
-    if not sess.get("thinking", True):
+    gemini = "generativelanguage.googleapis.com" in sess.base_url
+    if not sess.thinking:
         if gemini:
             # Gemini only accepts "none" on 2.5 non-Pro models; Gemini 3 and 2.5 Pro
             # can't turn reasoning off, so use the lowest level it allows.
-            model = sess.get("model", "")
+            model = sess.model
             if "2.5" in model and "pro" not in model:
                 return {"reasoning_effort": "none"}
             return {"reasoning_effort": "minimal"}
         return {"reasoning_effort": "none"}
-    effort = sess.get("reasoning_effort", "default")
+    effort = sess.reasoning_effort
     if effort in ("default", None):
         return {}
     if gemini and effort == "xhigh":  # Gemini tops out at "high"

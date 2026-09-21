@@ -9,7 +9,7 @@ from rich.prompt import Prompt
 
 from .crypto import make_fernet
 from .mcp_client import McpManager
-from .store import WrongPasswordError, load_config
+from .store import UnsupportedConfigError, WrongPasswordError, load_config
 from .ui.chat import chat_loop
 from .ui.common import console, divider
 from .ui.menus import (
@@ -32,6 +32,12 @@ def main() -> None:
     except WrongPasswordError:
         console.print("[bold red]Wrong password or corrupted config.[/bold red]")
         sys.exit(1)
+    except UnsupportedConfigError as exc:
+        console.print(
+            f"[bold red]This config was saved by a newer ChatCLI (format version {exc}). "
+            "Update ChatCLI rather than risk overwriting it.[/bold red]"
+        )
+        sys.exit(1)
     mcp = McpManager()
     atexit.register(mcp.close)  # stop MCP server subprocesses however we exit
 
@@ -50,10 +56,10 @@ def main() -> None:
             break
 
         elif ch == "1":
-            if not config["endpoints"]:
+            if not config.endpoints:
                 console.print("[yellow]No endpoints saved. Add one via option 3.[/yellow]")
                 continue
-            if not config["system_prompts"]:
+            if not config.system_prompts:
                 console.print("[yellow]No system prompts saved. Add one via option 4.[/yellow]")
                 continue
             sess = start_new(config)
@@ -62,7 +68,7 @@ def main() -> None:
                 chat_loop(sess, mcp)
 
         elif ch == "2":
-            if not config["endpoints"]:
+            if not config.endpoints:
                 console.print("[yellow]No endpoints saved. Add one via option 3.[/yellow]")
                 continue
             sess = resume_session(config)

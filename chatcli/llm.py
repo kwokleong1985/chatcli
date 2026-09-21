@@ -8,13 +8,14 @@ from typing import Optional, List, Dict, Any
 from openai import OpenAI
 
 from .mcp_client import McpManager
+from .models import Session
 from .paths import LOG_DIR, API_ERROR_LOG
 from .providers import reasoning_params
 
 MAX_TOOL_ROUNDS = 8            # model <-> tool round trips per user message
 
 
-def log_api_error(sess: dict, request: dict, exc: Exception) -> Path:
+def log_api_error(sess: Session, request: dict, exc: Exception) -> Path:
     """Append one JSON line to the error log with the request sent and the response received.
 
     The API key is never logged. Note the log holds conversation text in plaintext,
@@ -38,8 +39,8 @@ def log_api_error(sess: dict, request: dict, exc: Exception) -> Path:
 
     entry = {
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
-        "endpoint": sess.get("endpoint_name"),
-        "base_url": sess.get("base_url"),
+        "endpoint": sess.endpoint_name,
+        "base_url": sess.base_url,
         "request": request,
         "response": response or None,
         "error_type": type(exc).__name__,
@@ -63,7 +64,7 @@ def _add_usage(a: Any, b: Any) -> Any:
     return b
 
 
-def ask_model(sess: dict, user_text: str, mcp: Optional["McpManager"] = None, on_tool=None) -> tuple:
+def ask_model(sess: Session, user_text: str, mcp: Optional[McpManager] = None, on_tool=None) -> tuple:
     """Returns (reply_text, usage_dict_or_None). Failed calls are logged and re-raised.
 
     If MCP tools are available the model may call them; each call is run through `mcp`
@@ -71,15 +72,15 @@ def ask_model(sess: dict, user_text: str, mcp: Optional["McpManager"] = None, on
     is called after every tool run. Only the final text reply is returned (and later
     stored in history); intermediate tool messages exist for this one turn.
     """
-    client = OpenAI(api_key=sess["api_key"], base_url=sess["base_url"])
-    history: List[Dict[str, Any]] = [{"role": "system", "content": sess["system_prompt"]}]
-    history += sess["messages"]
+    client = OpenAI(api_key=sess.api_key, base_url=sess.base_url)
+    history: List[Dict[str, Any]] = [{"role": "system", "content": sess.system_prompt}]
+    history += sess.messages
     history += [{"role": "user", "content": user_text}]
     kwargs: Dict[str, Any] = {}
     extra = reasoning_params(sess)
     if extra:
         kwargs["extra_body"] = extra
-    tools = mcp.openai_tools() if mcp is not None and sess.get("tools", True) else []
+    tools = mcp.openai_tools() if mcp is not None and sess.tools else []
     if tools:
         kwargs["tools"] = tools
 
@@ -88,10 +89,10 @@ def ask_model(sess: dict, user_text: str, mcp: Optional["McpManager"] = None, on
         if round_no == MAX_TOOL_ROUNDS:
             kwargs.pop("tools", None)  # out of rounds: force a plain-text answer
         try:
-            resp = client.chat.completions.create(model=sess["model"], messages=history, **kwargs)
+            resp = client.chat.completions.create(model=sess.model, messages=history, **kwargs)
         except Exception as exc:
             try:
-                log_api_error(sess, {"model": sess["model"], "messages": history, **kwargs}, exc)
+                log_api_error(sess, {"model": sess.model, "messages": history, **kwargs}, exc)
             except Exception:
                 pass  # never let logging mask the real API error
             raise
