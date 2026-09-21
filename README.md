@@ -71,12 +71,38 @@ Requests are throttled to about one per second to fit Brave's free plan. Set `BR
 
 ## Development
 
+### Running the tests
+
+Install the dependencies plus [pytest](https://docs.pytest.org/), then run the suite from the repository root:
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-The tests run against a throwaway home directory, so they never touch your real `~/.chatcli`. They use a fake API client and, for the MCP tests, the bundled Brave server with a dummy key. Nothing goes over the network.
+The whole suite takes a few seconds. A passing run ends with a line like `171 passed`. When a test fails, pytest prints the failing assertion and the values involved.
+
+Useful variations:
+
+| Command | What it does |
+| --- | --- |
+| `python -m pytest -v` | List every test as it runs |
+| `python -m pytest -x` | Stop at the first failure |
+| `python -m pytest tests/test_llm.py` | Run one file |
+| `python -m pytest tests/test_chat.py::test_quit_stops_the_loop` | Run one test |
+| `python -m pytest -k "markup or escape"` | Run tests whose name contains a keyword |
+| `python -m pytest --collect-only -q` | List the tests without running them |
+| `python -m pytest --durations=5` | Show the five slowest tests |
+
+The tests are safe to run on a machine where you use ChatCLI:
+
+- They run against a throwaway home directory, so they never read or change your real `~/.chatcli`. If that isolation ever fails, `tests/conftest.py` refuses to run at all.
+- Nothing goes over the network. The model is replaced by a fake client, and the MCP tests start the bundled Brave server with a dummy key without ever searching.
+- The test that starts that real server is skipped automatically if the `mcp` package isn't installed.
+
+Each test file covers one area of the code: for example `test_store.py` for saving and loading, `test_llm.py` for the model call and tool loop, and `test_chat.py` for slash commands. Shared helpers are in `tests/conftest.py`: `out` captures what the app prints, `prompts("1", "0")` scripts the answers to menu prompts, and `session`, `endpoint` and `fernet` provide ready-made test objects.
+
+### Code layout
 
 The code lives in the `chatcli/` package:
 
