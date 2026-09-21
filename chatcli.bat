@@ -1,2 +1,4 @@
 @echo off
-python "%~dp0chatcli.py" %*
+setlocal
+set "PYTHONPATH=%~dp0;%PYTHONPATH%"
+python -m chatcli %*

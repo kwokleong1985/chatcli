@@ -35,7 +35,7 @@ pip install -r requirements.txt
 chatcli.bat
 ```
 
-or `python chatcli.py`.
+or `python -m chatcli` from the repository root.
 
 On first run you choose a master password. It encrypts your saved endpoints, so don't lose it: the config can't be recovered without it. From the main menu you can:
 
