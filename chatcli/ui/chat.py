@@ -49,7 +49,7 @@ def command(*names: str, help: str, usage: Optional[str] = None):
 
 def _parse_on_off(arg: str, usage: str) -> Optional[bool]:
     if arg not in ("on", "off"):
-        console.print(f"[yellow]Usage: {usage}[/yellow]")
+        console.print(f"[yellow]Usage: {escape(usage)}[/yellow]")
         return None
     return arg == "on"
 
@@ -77,7 +77,7 @@ def _cmd_quit(ctx: ChatContext, arg: str) -> None:
 @command("/system", help="show system prompt")
 def _cmd_system(ctx: ChatContext, arg: str) -> None:
     console.print(Panel(
-        ctx.sess.system_prompt,
+        escape(ctx.sess.system_prompt),
         title=f"[cyan]System Prompt — {ctx.sess.prompt_name}[/cyan]",
         border_style="cyan",
     ))
@@ -135,7 +135,7 @@ def _cmd_tools(ctx: ChatContext, arg: str) -> None:
         for server, names in (mcp.server_tools.items() if mcp else []):
             console.print(f"[dim]{escape(server)}:[/dim] {', '.join(names) or 'no tools'}")
     else:
-        console.print("[yellow]Usage: /tools [on|off][/yellow]")
+        console.print(f"[yellow]Usage: {escape('/tools [on|off]')}[/yellow]")
 
 
 @command("/clear", help="delete chat history (keeps settings)")
@@ -161,7 +161,7 @@ def _cmd_clear(ctx: ChatContext, arg: str) -> None:
 
 
 _BY_NAME: Dict[str, Command] = {name: c for c in COMMANDS for name in c.names}
-_HELP = "    ".join(f"[dim]{c.usage}[/dim]  {c.help}" for c in COMMANDS)
+_HELP = "    ".join(f"[dim]{escape(c.usage)}[/dim]  {c.help}" for c in COMMANDS)
 
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ def _print_banner(ctx: ChatContext) -> None:
 
 
 def _print_user(text: str) -> None:
-    console.print(Panel(text, title="[green]You[/green]", border_style="green", title_align="left"))
+    console.print(Panel(escape(text), title="[green]You[/green]", border_style="green", title_align="left"))
 
 
 def _print_assistant(text: str) -> None:
@@ -210,7 +210,7 @@ def _send(ctx: ChatContext, text: str) -> None:
         try:
             reply, usage = ask_model(sess, text, ctx.mcp, _show_tool_call)
         except Exception as exc:
-            console.print(f"[red]API error: {exc}[/red]")
+            console.print(f"[red]API error: {escape(str(exc))}[/red]")
             console.print(f"[dim]Request/response logged to {API_ERROR_LOG}[/dim]")
             return
 
