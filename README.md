@@ -69,6 +69,27 @@ On first run you choose a master password. It encrypts your saved endpoints, so 
 
 Requests are throttled to about one per second to fit Brave's free plan. Set `BRAVE_MIN_INTERVAL` (seconds) to change that on a paid plan.
 
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests run against a throwaway home directory, so they never touch your real `~/.chatcli`. They use a fake API client and, for the MCP tests, the bundled Brave server with a dummy key. Nothing goes over the network.
+
+The code lives in the `chatcli/` package:
+
+| Module | Responsibility |
+| --- | --- |
+| `app.py` | Entry point: unlock the config, run the main menu |
+| `models.py` | Dataclasses for the config and conversations |
+| `store.py`, `fileio.py` | Encrypted config and history files; crash-safe writes |
+| `crypto.py`, `paths.py` | Master-password key derivation; file locations |
+| `llm.py`, `providers.py` | The model call and tool-calling loop; provider-specific settings |
+| `mcp_client.py` | Synchronous wrapper around stdio MCP servers |
+| `ui/` | Menus, chat loop and slash commands (add a command with `@command`) |
+
 ## Security notes
 
 - Config and logs live in `~/.chatcli`, outside this repository. Never commit that folder.

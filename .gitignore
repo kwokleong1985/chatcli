@@ -17,3 +17,6 @@ salt.bin
 *.jsonl
 .vscode/
 .idea/
+
+# Tests
+.pytest_cache/
