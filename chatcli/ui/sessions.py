@@ -9,7 +9,7 @@ from ..models import Config, Session
 from ..paths import HISTORY_DIR
 from ..store import list_sessions
 from .common import console, pick
-from .menus import ep_label
+from .menus.endpoints import ep_label
 
 
 def _sess_label(s: Session) -> str:
