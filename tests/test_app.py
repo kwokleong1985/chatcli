@@ -76,7 +76,7 @@ def test_first_run_setup_then_a_conversation_that_survives_a_restart(out, prompt
     monkeypatch.setattr(app, "make_fernet", lambda password: fernet)
     lines = iter(["be helpful", "---"])
     monkeypatch.setattr("builtins.input", lambda *_: next(lines))
-    monkeypatch.setattr(chat, "ask_model", lambda sess, text, mcp, on_tool: (f"echo: {text}", None))
+    monkeypatch.setattr(chat, "ask_model", lambda sess, text, mcp, on_tool, on_delta=None: (f"echo: {text}", None))
 
     prompts(
         "3", "1", "ep", "http://x/v1", "model-x", "off", "0",       # add an endpoint
@@ -94,7 +94,8 @@ def test_first_run_setup_then_a_conversation_that_survives_a_restart(out, prompt
 
     # "Restart": resume it, the key comes back from the encrypted config, not from history
     seen = []
-    monkeypatch.setattr(chat, "ask_model", lambda sess, text, mcp, on_tool: (seen.append(sess.api_key) or "again", None))
+    monkeypatch.setattr(chat, "ask_model",
+                         lambda sess, text, mcp, on_tool, on_delta=None: (seen.append(sess.api_key) or "again", None))
     prompts("2", "1", "more", "/quit", "0")
     app.main()
     assert seen == ["API-KEY"]

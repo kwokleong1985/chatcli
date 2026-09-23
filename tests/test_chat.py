@@ -178,10 +178,12 @@ def model(monkeypatch):
     """Replace the API call; `model.sent` records what would have been sent."""
     state = SimpleNamespace(sent=[], reply="the reply", usage=None, error=None)
 
-    def fake(sess, text, mcp, on_tool):
+    def fake(sess, text, mcp, on_tool, on_delta=None):
         state.sent.append(text)
         if state.error:
             raise state.error
+        if on_delta:
+            on_delta(state.reply)
         return state.reply, state.usage
     monkeypatch.setattr(chat, "ask_model", fake)
     return state

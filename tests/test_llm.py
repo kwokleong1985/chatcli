@@ -18,22 +18,38 @@ def _usage(prompt, completion, cached=0):
     return SimpleNamespace(model_dump=lambda: data)
 
 
+def _chunk(**delta_fields):
+    """One streamed chunk carrying a single delta (a fragment of content, or of tool_calls)."""
+    delta = SimpleNamespace(model_dump=lambda exclude_none=True: delta_fields)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None)
+
+
+def _usage_chunk(usage):
+    """The trailing chunk real OpenAI-compatible streams send when include_usage is set: no choices."""
+    return SimpleNamespace(choices=[], usage=usage)
+
+
 def text_reply(content, usage=None):
-    msg = SimpleNamespace(tool_calls=None, content=content)
-    return SimpleNamespace(usage=usage, choices=[SimpleNamespace(message=msg)])
+    """A stream that yields `content` as one fragment, then usage. `content=None` yields nothing."""
+    chunks = [_chunk(content=content)] if content is not None else []
+    if usage is not None:
+        chunks.append(_usage_chunk(usage))
+    return chunks
 
 
 def tool_reply(*calls, usage=None):
-    """calls: (id, name, raw_json_arguments)"""
-    tcs = [SimpleNamespace(id=i, function=SimpleNamespace(name=n, arguments=a)) for i, n, a in calls]
-    dump = {"role": "assistant", "tool_calls": [
-        {"id": i, "type": "function", "function": {"name": n, "arguments": a}} for i, n, a in calls]}
-    msg = SimpleNamespace(tool_calls=tcs, content=None, model_dump=lambda exclude_none=True: dump)
-    return SimpleNamespace(usage=usage, choices=[SimpleNamespace(message=msg)])
+    """calls: (id, name, raw_json_arguments). Each call streams as one tool_calls delta at its index."""
+    deltas = [{"index": idx, "id": i, "type": "function", "function": {"name": n, "arguments": a}}
+              for idx, (i, n, a) in enumerate(calls)]
+    chunks = [_chunk(tool_calls=deltas)]
+    if usage is not None:
+        chunks.append(_usage_chunk(usage))
+    return chunks
 
 
 class FakeClient:
-    """Stands in for openai.OpenAI. `replies` are returned in order (the last one repeats)."""
+    """Stands in for openai.OpenAI. `replies` are streams (lists of chunks), returned in order
+    (the last one repeats)."""
 
     def __init__(self, *replies):
         self.replies, self.calls, self.init_kwargs = list(replies), [], None
@@ -113,6 +129,28 @@ def test_reasoning_settings_go_out_via_extra_body(client, session):
     session.thinking = False
     ask_model(session, "q")
     assert c.calls[0]["extra_body"] == {"reasoning_effort": "none"}
+
+
+# ── streaming ─────────────────────────────────────────────────────────────────
+
+def test_on_delta_receives_every_streamed_text_fragment(client, session):
+    c = client([
+        _chunk(reasoning_content="thinking "),   # never reaches the reply, but should still stream
+        _chunk(content="hel"),
+        _chunk(content="lo"),
+    ])
+    seen = []
+    reply, _ = ask_model(session, "q", on_delta=seen.append)
+    assert reply == "hello"
+    assert seen == ["thinking ", "hel", "lo"]
+    assert c.calls[0]["stream"] is True
+
+
+def test_on_delta_ignores_the_role_field(client, session):
+    client([_chunk(role="assistant", content="hi")])
+    seen = []
+    ask_model(session, "q", on_delta=seen.append)
+    assert seen == ["hi"]
 
 
 # ── tool calling ──────────────────────────────────────────────────────────────

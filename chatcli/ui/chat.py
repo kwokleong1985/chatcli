@@ -1,6 +1,8 @@
 """The interactive chat loop and its slash commands."""
 
 import json
+import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -206,13 +208,42 @@ def _send(ctx: ChatContext, text: str) -> None:
     sess = ctx.sess
     _print_user(text)
 
-    with console.status("[blue]Thinking…[/blue]", spinner="dots"):
+    start = time.monotonic()
+    chars = 0
+
+    def label() -> str:
+        elapsed = time.monotonic() - start
+        if chars == 0:
+            return f"[blue]Thinking… {elapsed:.0f}s[/blue]"
+        return f"[blue]Answering… {elapsed:.0f}s · ~{max(1, chars // 4)} tokens[/blue]"
+
+    with console.status(label(), spinner="dots") as status:
+        def on_delta(fragment: str) -> None:
+            nonlocal chars
+            chars += len(fragment)
+            status.update(label())
+
+        # Ticks the elapsed time even during silent stretches (e.g. a slow reasoning
+        # model that streams nothing until it starts answering), so the status never
+        # looks frozen. Stopped before the `with` block exits either way.
+        stop = threading.Event()
+
+        def tick() -> None:
+            while not stop.wait(1):
+                status.update(label())
+
+        ticker = threading.Thread(target=tick, daemon=True)
+        ticker.start()
         try:
-            reply, usage = ask_model(sess, text, ctx.mcp, _show_tool_call)
+            reply, usage = ask_model(sess, text, ctx.mcp, _show_tool_call, on_delta)
         except Exception as exc:
+            stop.set()
+            ticker.join()
             console.print(f"[red]API error: {escape(str(exc))}[/red]")
             console.print(f"[dim]Request/response logged to {API_ERROR_LOG}[/dim]")
             return
+        stop.set()
+        ticker.join()
 
     sess.messages.append({"role": "user", "content": text})
     sess.messages.append({"role": "assistant", "content": reply})

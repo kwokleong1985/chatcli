@@ -1,9 +1,10 @@
-"""The chat-completion call: tool-calling loop, usage totals and the API error log."""
+"""The chat-completion call: streaming, the tool-calling loop, usage totals and the
+API error log."""
 
 import json
 import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 
 from openai import OpenAI
 
@@ -13,6 +14,8 @@ from .paths import LOG_DIR, API_ERROR_LOG
 from .providers import reasoning_params
 
 MAX_TOOL_ROUNDS = 8            # model <-> tool round trips per user message
+
+OnDelta = Optional[Callable[[str], None]]
 
 
 def log_api_error(sess: Session, request: dict, exc: Exception) -> Path:
@@ -64,19 +67,53 @@ def _add_usage(a: Any, b: Any) -> Any:
     return b
 
 
-def ask_model(sess: Session, user_text: str, mcp: Optional[McpManager] = None, on_tool=None) -> tuple:
+def _merge_delta(acc: Dict[str, Any], delta: Dict[str, Any], on_delta: OnDelta) -> None:
+    """Fold one streamed delta into the message being assembled for this round.
+
+    String fields (content, and provider extras like reasoning_content or a Gemini
+    thought signature) are concatenated fragment by fragment; tool_calls arrive
+    piecemeal per `index` and are merged by that index, the same shape OpenAI's own
+    streaming examples accumulate. `on_delta` fires for every text fragment except
+    `role` (sent once, whole, and not something a caller wants to "see" streaming) so
+    callers can show live progress even for fields, like reasoning content, that never
+    reach the saved history.
+    """
+    for key, value in delta.items():
+        if value is None:
+            continue
+        if key == "tool_calls":
+            calls = acc.setdefault("tool_calls", {})
+            for tc in value:
+                entry = calls.setdefault(tc["index"], {})
+                _merge_delta(entry, {k: v for k, v in tc.items() if k != "index"}, None)
+            continue
+        if isinstance(value, str):
+            if on_delta and key != "role":
+                on_delta(value)
+            acc[key] = acc.get(key, "") + value
+        elif isinstance(value, dict):
+            _merge_delta(acc.setdefault(key, {}), value, on_delta)
+        else:
+            acc[key] = value
+
+
+def ask_model(sess: Session, user_text: str, mcp: Optional[McpManager] = None,
+              on_tool=None, on_delta: OnDelta = None) -> tuple:
     """Returns (reply_text, usage_dict_or_None). Failed calls are logged and re-raised.
 
-    If MCP tools are available the model may call them; each call is run through `mcp`
-    and its result fed back until the model answers in text. `on_tool(name, args, result)`
-    is called after every tool run. Only the final text reply is returned (and later
-    stored in history); intermediate tool messages exist for this one turn.
+    The reply streams in; `on_delta(fragment)` fires for every piece of text the model
+    sends (including reasoning content that never ends up in the returned reply), so
+    callers can show live progress instead of waiting in silence. If MCP tools are
+    available the model may call them; each call is run through `mcp` and its result
+    fed back until the model answers in text. `on_tool(name, args, result)` is called
+    after every tool run. Only the final text reply is returned (and later stored in
+    history); intermediate tool messages exist for this one turn.
     """
     client = OpenAI(api_key=sess.api_key, base_url=sess.base_url)
     history: List[Dict[str, Any]] = [{"role": "system", "content": sess.system_prompt}]
     history += sess.messages
     history += [{"role": "user", "content": user_text}]
-    kwargs: Dict[str, Any] = {}
+    kwargs: Dict[str, Any] = {"stream": True, "stream_options": {"include_usage": True}}
     extra = reasoning_params(sess)
     if extra:
         kwargs["extra_body"] = extra
@@ -88,30 +125,37 @@ def ask_model(sess: Session, user_text: str, mcp: Optional[McpManager] = None, o
     for round_no in range(MAX_TOOL_ROUNDS + 1):
         if round_no == MAX_TOOL_ROUNDS:
             kwargs.pop("tools", None)  # out of rounds: force a plain-text answer
+        acc: Dict[str, Any] = {}
+        usage = None
         try:
-            resp = client.chat.completions.create(model=sess.model, messages=history, **kwargs)
+            for chunk in client.chat.completions.create(model=sess.model, messages=history, **kwargs):
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage.model_dump()
+                if not chunk.choices:  # the trailing usage-only chunk has none
+                    continue
+                delta = chunk.choices[0].delta.model_dump(exclude_none=True)
+                _merge_delta(acc, delta, on_delta)
         except Exception as exc:
             try:
                 log_api_error(sess, {"model": sess.model, "messages": history, **kwargs}, exc)
             except Exception:
                 pass  # never let logging mask the real API error
             raise
-        if getattr(resp, "usage", None):
-            total_usage = _add_usage(total_usage, resp.usage.model_dump())
-        msg = resp.choices[0].message
-        if not msg.tool_calls:
-            return msg.content or "", total_usage
+        if usage:
+            total_usage = _add_usage(total_usage, usage)
 
-        # model_dump keeps provider extras (e.g. Gemini 3 thought signatures) that
-        # must be echoed back alongside the tool results.
-        history.append(msg.model_dump(exclude_none=True))
-        for tc in msg.tool_calls:
+        tool_calls = acc.pop("tool_calls", None)
+        if not tool_calls:
+            return acc.get("content", "") or "", total_usage
+
+        history.append({"role": "assistant", **acc, "tool_calls": [tool_calls[i] for i in sorted(tool_calls)]})
+        for tc in history[-1]["tool_calls"]:
             try:
-                args = json.loads(tc.function.arguments or "{}")
-                result = mcp.call(tc.function.name, args)
+                args = json.loads(tc.get("function", {}).get("arguments") or "{}")
+                result = mcp.call(tc["function"]["name"], args)
             except json.JSONDecodeError:
                 args, result = {}, "Error: tool arguments were not valid JSON"
             if on_tool:
-                on_tool(tc.function.name, args, result)
-            history.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                on_tool(tc["function"]["name"], args, result)
+            history.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
     return "(Stopped: too many tool-call rounds without a final answer.)", total_usage

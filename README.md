@@ -8,6 +8,7 @@ A conversational command-line client for any OpenAI-compatible API, with encrypt
 - Endpoints, system prompts and MCP servers are stored in an encrypted config (`~/.chatcli/config.enc`), unlocked with a master password (PBKDF2 + Fernet).
 - Named conversations are saved to `~/.chatcli/history`. API keys are never written to the history files.
 - Reasoning controls: toggle thinking and set reasoning effort.
+- Replies stream in, with a live status showing elapsed time and an estimated token count so a long reply never looks stuck.
 - Optional per-reply token and cache usage stats.
 - Export the whole config (endpoints, system prompts, MCP servers, settings) to a single encrypted file and import it on another machine to move your setup over.
 - MCP support: connect stdio MCP servers and let the model call their tools.
