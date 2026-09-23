@@ -173,6 +173,28 @@ def test_tool_round_trip_feeds_the_result_back_and_sums_usage(client, session):
     assert second["messages"][-1] == {"role": "tool", "tool_call_id": "c1", "content": "result:t1"}
 
 
+def test_tool_call_assistant_message_always_has_a_content_field(client, session):
+    """Some local OpenAI-compatible servers (e.g. LM Studio) reject a tool-calling
+    assistant message that has no 'content' key at all."""
+    c = client(tool_reply(("c1", "t1", "{}")), text_reply("done"))
+    ask_model(session, "go", FakeMcp())
+    assert c.calls[1]["messages"][-2]["content"] == ""
+
+
+def test_a_type_resent_on_more_than_one_chunk_does_not_get_doubled(client, session):
+    """A server that repeats 'type': 'function' across chunks for the same tool call
+    must not end up with the field concatenated into 'functionfunction'."""
+    chunks = [
+        _chunk(tool_calls=[{"index": 0, "id": "c1", "type": "function",
+                            "function": {"name": "t1", "arguments": '{"a":'}}]),
+        _chunk(tool_calls=[{"index": 0, "type": "function", "function": {"arguments": "1}"}}]),
+    ]
+    client(chunks, text_reply("done"))
+    mcp = FakeMcp()
+    ask_model(session, "go", mcp)
+    assert mcp.calls == [("t1", {"a": 1})]
+
+
 def test_several_tool_calls_in_one_reply_are_all_answered(client, session):
     c = client(tool_reply(("a", "t1", "{}"), ("b", "t1", "{}")), text_reply("done"))
     mcp = FakeMcp()

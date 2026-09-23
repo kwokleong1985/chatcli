@@ -67,16 +67,37 @@ def _add_usage(a: Any, b: Any) -> Any:
     return b
 
 
+def _merge_tool_call_delta(entry: Dict[str, Any], delta: Dict[str, Any]) -> None:
+    """Fold one streamed tool-call delta into the call being assembled.
+
+    Unlike `content`, only `function.arguments` genuinely streams in fragments here;
+    `id`, `type` and `function.name` are sent whole (some local servers, e.g. LM
+    Studio, even resend the same `type` on more than one chunk), so those overwrite
+    instead of concatenating to avoid doubled-up values like `"functionfunction"`.
+    """
+    for key, value in delta.items():
+        if value is None:
+            continue
+        if key == "function":
+            fn = entry.setdefault("function", {})
+            for k, v in value.items():
+                if v is None:
+                    continue
+                fn[k] = fn.get(k, "") + v if k == "arguments" and isinstance(v, str) else v
+        else:
+            entry[key] = value
+
+
 def _merge_delta(acc: Dict[str, Any], delta: Dict[str, Any], on_delta: OnDelta) -> None:
     """Fold one streamed delta into the message being assembled for this round.
 
     String fields (content, and provider extras like reasoning_content or a Gemini
     thought signature) are concatenated fragment by fragment; tool_calls arrive
-    piecemeal per `index` and are merged by that index, the same shape OpenAI's own
-    streaming examples accumulate. `on_delta` fires for every text fragment except
-    `role` (sent once, whole, and not something a caller wants to "see" streaming) so
-    callers can show live progress even for fields, like reasoning content, that never
-    reach the saved history.
+    piecemeal per `index` and are merged by that index (see `_merge_tool_call_delta`),
+    the same shape OpenAI's own streaming examples accumulate. `on_delta` fires for
+    every text fragment except `role` (sent once, whole, and not something a caller
+    wants to "see" streaming) so callers can show live progress even for fields, like
+    reasoning content, that never reach the saved history.
     """
     for key, value in delta.items():
         if value is None:
@@ -85,7 +106,7 @@ def _merge_delta(acc: Dict[str, Any], delta: Dict[str, Any], on_delta: OnDelta) 
             calls = acc.setdefault("tool_calls", {})
             for tc in value:
                 entry = calls.setdefault(tc["index"], {})
-                _merge_delta(entry, {k: v for k, v in tc.items() if k != "index"}, None)
+                _merge_tool_call_delta(entry, {k: v for k, v in tc.items() if k != "index"})
             continue
         if isinstance(value, str):
             if on_delta and key != "role":
@@ -148,7 +169,12 @@ def ask_model(sess: Session, user_text: str, mcp: Optional[McpManager] = None,
         if not tool_calls:
             return acc.get("content", "") or "", total_usage
 
-        history.append({"role": "assistant", **acc, "tool_calls": [tool_calls[i] for i in sorted(tool_calls)]})
+        history.append({
+            "role": "assistant",
+            "content": acc.get("content", ""),
+            **{k: v for k, v in acc.items() if k != "content"},
+            "tool_calls": [tool_calls[i] for i in sorted(tool_calls)],
+        })
         for tc in history[-1]["tool_calls"]:
             try:
                 args = json.loads(tc.get("function", {}).get("arguments") or "{}")
