@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from chatcli import paths, store
+from chatcli import crypto, paths, store
 from chatcli.models import CONFIG_VERSION, Config, Endpoint
 
 
@@ -64,6 +64,44 @@ def test_config_from_a_newer_version_is_refused(fernet):
     _write_raw_config(fernet, {"version": CONFIG_VERSION + 1, "endpoints": []})
     with pytest.raises(store.UnsupportedConfigError):
         store.load_config(fernet)
+
+
+def test_export_requires_a_saved_config(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        store.export_config(tmp_path / "out.enc")
+
+
+def test_export_then_import_round_trips_on_a_fresh_machine(tmp_path, fernet, endpoint):
+    crypto.get_or_create_salt()
+    store.save_config(Config(endpoints=[endpoint]), fernet)
+    dest = tmp_path / "export.enc"
+    store.export_config(dest)
+
+    paths.SALT_FILE.unlink()
+    paths.CONFIG_FILE.unlink()
+    store.import_config(dest)
+
+    assert store.load_config(fernet) == Config(endpoints=[endpoint])
+
+
+def test_export_file_is_not_readable_without_decrypting_it(tmp_path, fernet, endpoint):
+    crypto.get_or_create_salt()
+    store.save_config(Config(endpoints=[endpoint]), fernet)
+    dest = tmp_path / "export.enc"
+    store.export_config(dest)
+    raw = dest.read_bytes()
+    assert b"KEY" not in raw and b"http://x/v1" not in raw
+
+
+def test_import_rejects_a_file_that_isnt_a_chatcli_export(tmp_path):
+    bogus = tmp_path / "bogus.enc"
+    bogus.write_text("not json")
+    with pytest.raises(store.ExportError):
+        store.import_config(bogus)
+
+    bogus.write_text(json.dumps({"chatcli_export": 999, "salt": "", "config": ""}))
+    with pytest.raises(store.ExportError):
+        store.import_config(bogus)
 
 
 def test_failed_config_save_keeps_the_old_file_and_leaves_no_temp_files(fernet, endpoint, monkeypatch):

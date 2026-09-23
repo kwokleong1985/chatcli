@@ -9,6 +9,7 @@ A conversational command-line client for any OpenAI-compatible API, with encrypt
 - Named conversations are saved to `~/.chatcli/history`. API keys are never written to the history files.
 - Reasoning controls: toggle thinking and set reasoning effort.
 - Optional per-reply token and cache usage stats.
+- Export the whole config (endpoints, system prompts, MCP servers, settings) to a single encrypted file and import it on another machine to move your setup over.
 - MCP support: connect stdio MCP servers and let the model call their tools.
 - Includes a ready-made Brave Search MCP server (`brave_search_mcp.py`) with web and news search.
 
@@ -116,10 +117,20 @@ The code lives in the `chatcli/` package:
 | `mcp_client.py` | Synchronous wrapper around stdio MCP servers |
 | `ui/` | Menus, chat loop and slash commands (add a command with `@command`) |
 
+## Moving to another machine
+
+From the main menu, go to **Settings**:
+
+- **Export config to file** writes a single file bundling your endpoints, system prompts, MCP servers and settings. It's still encrypted with your master password, so it's safe to move over USB, cloud storage, etc.
+- **Import config from file**, on the other machine, replaces its local config with the imported one. Restart ChatCLI afterwards and unlock with the master password used on the machine that made the export.
+
+Conversation history isn't included; copy `~/.chatcli/history/` yourself if you want it too.
+
 ## Security notes
 
 - Config and logs live in `~/.chatcli`, outside this repository. Never commit that folder.
 - The API error log (`~/.chatcli/logs/api_errors.jsonl`) may contain request details, so check it before sharing.
+- An exported config file is as sensitive as `config.enc` itself (same encryption, same master password) — handle it with the same care.
 
 ## License
 
