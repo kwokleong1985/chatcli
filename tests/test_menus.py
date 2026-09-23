@@ -150,6 +150,16 @@ def test_add_mcp_server_parses_quoted_arguments_and_collects_env_vars(fernet, ou
     assert "MCP server 'srv' saved." in flat(out)
 
 
+def test_edit_mcp_server_changes_path_without_retyping_env_vars(fernet, out, prompts):
+    cfg = Config(mcp_servers=[McpServerConfig("srv", "python", ["old.py"], env={"API_KEY": "secret"})])
+    prompts("4", "1", "python", "new_script.py", "y", "0")
+    menus.manage_mcp_servers(cfg, fernet, FakeMcp())
+    (s,) = reload(fernet).mcp_servers
+    assert s.args == ["new_script.py"]
+    assert s.env == {"API_KEY": "secret"}
+    assert "MCP server 'srv' updated." in flat(out)
+
+
 def test_mcp_list_shows_connection_status_per_server(fernet, out, prompts):
     cfg = Config(mcp_servers=[McpServerConfig("ok", "python", ["a.py"]),
                               McpServerConfig("bad", "nope"),

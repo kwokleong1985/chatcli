@@ -6,7 +6,7 @@ import shlex
 import getpass
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from cryptography.fernet import Fernet
 from rich.markup import escape
@@ -198,11 +198,27 @@ def _mcp_label(s: McpServerConfig) -> str:
     return f"{s.name}  {s.command} {' '.join(s.args)}"
 
 
-def _new_mcp_server() -> McpServerConfig:
-    name = Prompt.ask("Name (e.g. brave-search)")
-    command = Prompt.ask("Command (e.g. python)")
-    raw_args = Prompt.ask("Arguments (e.g. C:\\path\\to\\brave_search_mcp.py)", default="")
+def _ask_command_and_args(cur_command: str = "", cur_args: Sequence[str] = ()) -> tuple:
+    """Prompt for command and args, pre-filled with current values when editing."""
+    command = Prompt.ask("Command (e.g. python)", default=cur_command or None)
+    raw_args = Prompt.ask(
+        "Arguments (e.g. C:\\path\\to\\brave_search_mcp.py)",
+        default=" ".join(cur_args) if cur_args else "",
+    )
     args = [a.strip("\"'") for a in shlex.split(raw_args, posix=(os.name != "nt"))]
+    return command, args
+
+
+def _ask_env(cur_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Prompt for environment variables, keeping existing ones by default."""
+    if cur_env:
+        keep = Prompt.ask(
+            f"Keep existing env vars ({', '.join(cur_env)})?",
+            choices=["y", "n"],
+            default="y",
+        )
+        if keep == "y":
+            return dict(cur_env)
     env: Dict[str, str] = {}
     console.print("[dim]Environment variables for the server (e.g. BRAVE_API_KEY). "
                   "Leave the name blank to finish.[/dim]")
@@ -211,7 +227,25 @@ def _new_mcp_server() -> McpServerConfig:
         if not key:
             break
         env[key] = getpass.getpass(f"{key} value: ")
+    return env
+
+
+def _new_mcp_server() -> McpServerConfig:
+    name = Prompt.ask("Name (e.g. brave-search)")
+    command, args = _ask_command_and_args()
+    env = _ask_env()
     return McpServerConfig(name=name, command=command, args=args, env=env)
+
+
+def _edit_mcp_server(config: Config, fernet: Fernet) -> None:
+    idx = pick("Edit MCP server", config.mcp_servers, _mcp_label)
+    if idx is None:
+        return
+    s = config.mcp_servers[idx]
+    s.command, s.args = _ask_command_and_args(s.command, s.args)
+    s.env = _ask_env(s.env)
+    save_config(config, fernet)
+    console.print(f"[green]MCP server '{s.name}' updated.[/green]")
 
 
 def _mcp_menu(mcp: McpManager) -> CollectionMenu:
@@ -234,6 +268,7 @@ def _mcp_menu(mcp: McpManager) -> CollectionMenu:
         row=row,
         prompt_new=_new_mcp_server,
         saved_message=lambda s: f"MCP server '{s.name}' saved. It connects when you start a chat.",
+        extras=(MenuAction("Edit server", _edit_mcp_server),),
     )
 
 
