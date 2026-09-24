@@ -92,12 +92,13 @@ def _merge_delta(acc: Dict[str, Any], delta: Dict[str, Any], on_delta: OnDelta) 
     """Fold one streamed delta into the message being assembled for this round.
 
     String fields (content, and provider extras like reasoning_content or a Gemini
-    thought signature) are concatenated fragment by fragment; tool_calls arrive
-    piecemeal per `index` and are merged by that index (see `_merge_tool_call_delta`),
-    the same shape OpenAI's own streaming examples accumulate. `on_delta` fires for
-    every text fragment except `role` (sent once, whole, and not something a caller
-    wants to "see" streaming) so callers can show live progress even for fields, like
-    reasoning content, that never reach the saved history.
+    thought signature) are concatenated fragment by fragment; `role` is sent once,
+    whole, so it overwrites instead (some servers resend it on more than one chunk).
+    tool_calls arrive piecemeal per `index` and are merged by that index (see
+    `_merge_tool_call_delta`), the same shape OpenAI's own streaming examples
+    accumulate. `on_delta` fires for every text fragment except `role` so callers
+    can show live progress even for fields, like reasoning content, that never
+    reach the saved history.
     """
     for key, value in delta.items():
         if value is None:
@@ -105,11 +106,19 @@ def _merge_delta(acc: Dict[str, Any], delta: Dict[str, Any], on_delta: OnDelta) 
         if key == "tool_calls":
             calls = acc.setdefault("tool_calls", {})
             for tc in value:
-                entry = calls.setdefault(tc["index"], {})
+                # Gemini's OpenAI-compat endpoint sometimes omits "index" on a
+                # single-tool-call turn; treat that as index 0 rather than crash.
+                entry = calls.setdefault(tc.get("index", 0), {})
                 _merge_tool_call_delta(entry, {k: v for k, v in tc.items() if k != "index"})
             continue
         if isinstance(value, str):
-            if on_delta and key != "role":
+            if key == "role":
+                # Sent once, whole; some servers (e.g. Gemini's OpenAI-compat
+                # endpoint) resend it on more than one chunk, so overwrite
+                # instead of concatenating to avoid "assistantassistant".
+                acc[key] = value
+                continue
+            if on_delta:
                 on_delta(value)
             acc[key] = acc.get(key, "") + value
         elif isinstance(value, dict):
