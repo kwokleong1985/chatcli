@@ -70,6 +70,11 @@ def prompts(monkeypatch):
             return answer
 
         monkeypatch.setattr(Prompt, "ask", ask)
+        monkeypatch.setattr("prompt_toolkit.prompt", ask)
+        import chatcli.ui.chat as chat_mod
+        monkeypatch.setattr(chat_mod, "pt_prompt", ask)
+        import chatcli.ui.menus.prompts as prompts_mod
+        monkeypatch.setattr(prompts_mod, "pt_prompt", ask)
         return it
     return script
 

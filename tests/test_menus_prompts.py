@@ -35,3 +35,41 @@ def test_delete_prompt(fernet, out, prompts, system_prompt):
     cfg = Config(system_prompts=[system_prompt])
     prompts_menu.manage_prompts(cfg, fernet)
     assert reload(fernet).system_prompts == []
+
+
+# ── Edit tests ────────────────────────────────────────────────────────────────
+
+def test_edit_prompt_rename_and_keep_content(fernet, out, prompts, system_prompt):
+    """Edit action (choice 4): rename without changing content."""
+    cfg = Config(system_prompts=[system_prompt])
+    # Menu: 4=Edit, pick item 1, new name "Updated", keep content y, then 0=Back
+    prompts("4", "1", "Updated", "y", "0")
+    prompts_menu.manage_prompts(cfg, fernet)
+    assert cfg.system_prompts[0].name == "Updated"
+    assert cfg.system_prompts[0].content == system_prompt.content
+    # Persisted
+    (saved,) = reload(fernet).system_prompts
+    assert saved.name == "Updated"
+    assert saved.content == system_prompt.content
+
+
+def test_edit_prompt_replace_content(fernet, out, prompts, system_prompt):
+    """Edit action (choice 4): change both name and content with multiline paste."""
+    cfg = Config(system_prompts=[system_prompt])
+    # Menu: 4=Edit, pick item 1, same name, replace content n, pasted multiline content, then 0=Back
+    prompts("4", "1", system_prompt.name, "n", "new line 1\nnew line 2", "0")
+    prompts_menu.manage_prompts(cfg, fernet)
+    assert cfg.system_prompts[0].content == "new line 1\nnew line 2"
+    (saved,) = reload(fernet).system_prompts
+    assert saved.content == "new line 1\nnew line 2"
+
+
+def test_edit_prompt_cancel_pick_returns_to_menu(fernet, out, prompts, system_prompt):
+    """Edit action (choice 4): cancelling the picker (pick 0) returns without saving."""
+    cfg = Config(system_prompts=[system_prompt])
+    original_content = system_prompt.content
+    # Menu: 4=Edit, pick 0 (cancel), then 0=Back
+    prompts("4", "0", "0")
+    prompts_menu.manage_prompts(cfg, fernet)
+    # Nothing changed and nothing saved
+    assert cfg.system_prompts[0].content == original_content
