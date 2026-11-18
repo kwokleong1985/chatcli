@@ -113,14 +113,11 @@ def _merge_delta(acc: Dict[str, Any], delta: Dict[str, Any], on_delta: OnDelta) 
             continue
         if isinstance(value, str):
             if key == "role":
-                # Sent once, whole; some servers (e.g. Gemini's OpenAI-compat
-                # endpoint) resend it on more than one chunk, so overwrite
-                # instead of concatenating to avoid "assistantassistant".
-                acc[key] = value
-                continue
-            if on_delta:
-                on_delta(value)
-            acc[key] = acc.get(key, "") + value
+                acc[key] = value  # role is always a whole token, never concatenate
+            else:
+                if on_delta:
+                    on_delta(value)
+                acc[key] = acc.get(key, "") + value
         elif isinstance(value, dict):
             _merge_delta(acc.setdefault(key, {}), value, on_delta)
         else:
@@ -181,7 +178,7 @@ def ask_model(sess: Session, user_text: str, mcp: Optional[McpManager] = None,
         history.append({
             "role": "assistant",
             "content": acc.get("content", ""),
-            **{k: v for k, v in acc.items() if k != "content"},
+            **{k: v for k, v in acc.items() if k not in ("content", "role")},
             "tool_calls": [tool_calls[i] for i in sorted(tool_calls)],
         })
         for tc in history[-1]["tool_calls"]:
