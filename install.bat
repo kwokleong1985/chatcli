@@ -1,12 +1,28 @@
 @echo off
-echo Installing ChatCLI dependencies...
-pip install -r "%~dp0requirements.txt"
-if %errorlevel% neq 0 (
+setlocal
+cd /d "%~dp0"
+
+echo [1/2] Checking Python virtual environment (.venv)...
+if not exist ".venv\Scripts\python.exe" (
+    echo Creating virtual environment in .venv...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo.
+        echo Failed to create virtual environment. Ensure Python 3 is installed and in PATH.
+        pause
+        exit /b 1
+    )
+)
+
+echo [2/2] Installing ChatCLI dependencies...
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 (
     echo.
-    echo Install failed. Make sure Python and pip are available.
+    echo Dependency installation failed.
     pause
     exit /b 1
 )
+
 echo.
-echo Done. Run chatcli.bat to start.
+echo Setup complete. Run chatcli.bat to start.
 pause
