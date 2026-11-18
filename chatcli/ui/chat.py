@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
+from prompt_toolkit import prompt as pt_prompt
+from prompt_toolkit.formatted_text import HTML
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
@@ -268,7 +270,7 @@ def chat_loop(sess: Session, mcp: Optional[McpManager] = None) -> None:
 
     while ctx.running:
         try:
-            user_input = Prompt.ask("\n[bold green]You[/bold green]").strip()
+            user_input = pt_prompt(HTML("\n<b><ansigreen>You</ansigreen></b>: ")).strip()
         except (KeyboardInterrupt, EOFError):
             break
 
